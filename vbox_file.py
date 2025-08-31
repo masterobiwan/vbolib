@@ -3,9 +3,15 @@ from collections import OrderedDict
 class VboxFile:
 
     def __init__(self, filepath):
+        """
+        Initialize VboxFile with the given file path.
+        Save all sections in plain text except the ones we intend to modify.
+        """
+
         self.filepath = filepath
 
-        sections = OrderedDict()
+        self.sections = OrderedDict()
+        self.nval = 0
         section = None
 
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -14,26 +20,36 @@ class VboxFile:
                 line_stripped = line.strip()
                 if line_stripped.startswith('[') and line_stripped.endswith(']'):
                     section = line_stripped.lower()
-                    sections[section] = []
+                    if section != '[data]':
+                        self.sections[section] = []
+                    else:
+                        self.sections[section] = OrderedDict()
                     continue
-                if section and line != '':
-                    sections[section].append(line)
-                elif line != '':
-                    # For lines before any section (file header)
-                    sections.setdefault('file_header', []).append(line)
-
-        # Parse header columns
-        header_columns = sections.get('[header]', [])
-        # Parse column names
-        column_names = []
-        if '[column names]' in sections and sections['[column names]']:
-            column_names = sections['[column names]'][0].split()
-
-        self.sections = sections
-        self.header_columns = header_columns
-        self.column_names = column_names
+                if line != '':
+                    if section == '[column names]':
+                        if '[column names]' in self.sections and not self.sections['[column names]']:
+                            self.sections['[column names]'] = line.split(' ')
+                        else:
+                            raise ValueError("Multiple [column names] lines found.")
+                    elif section == '[data]':
+                        if '[column names]' in self.sections and self.sections['[column names]']:
+                            self.nval += 1
+                            for i, col in enumerate(self.sections['[column names]']):
+                                line_list = line.split(' ')
+                                if col in self.sections[section]:
+                                    self.sections[section][col].append(line_list[i])
+                                else:
+                                    self.sections[section][col] = [line_list[i]]
+                    elif section:
+                        self.sections[section].append(line)
+                    else:
+                        # For lines before any section (file header)
+                        self.sections.setdefault('file_header', []).append(line)
 
     def write(self, filepath):
+        """
+        Write the VBOX file content to the specified file path.
+        """
         with open(filepath, 'w', encoding='utf-8') as f:
             for section, lines in self.sections.items():
                 if section == 'file_header':
@@ -45,19 +61,25 @@ class VboxFile:
                 # The [section] header
                 f.write(section + '\n')
 
-                if section == '[column names]' and self.column_names is not None:
-                    f.write(' '.join(self.column_names) + '\n')
+                if section == '[column names]' and self.sections[section] is not None:
+                    f.write(' '.join(self.sections[section]) + '\n')
                     # Add exactly one blank line after [column names]
                     f.write('\n')
-                elif section == '[header]' and self.header_columns is not None:
-                    for line in self.header_columns:
+                elif section == '[data]' and self.sections['[column names]'] is not None:
+                    for i in range(self.nval):
+                        line = []
+                        if self.sections[section]:
+                            for col in self.sections[section]:
+                                line.append(self.sections[section][col][i])
+                            f.write(' '.join(line) + '\n')
+                elif section == '[header]' and self.sections[section] is not None:
+                    for line in self.sections[section]:
                         f.write(line + '\n')
                     f.write('\n')
                 else:
                     for line in lines:
                         f.write(line + '\n')
-                    if section != '[data]':
-                        f.write('\n')
+                    f.write('\n')
 
     def __move_section(self, section_to_move, after_section):
         """
@@ -81,57 +103,44 @@ class VboxFile:
         # Rebuild OrderedDict
         self.sections = OrderedDict(items)
 
-    def __get_column_value(self, line, column_name):
-        """
-        Get the value of a specific column from a data line.
-        """
-        columns = line.split()
-        if column_name in self.column_names:
-            index = self.column_names.index(column_name)
-            return columns[index] if index < len(columns) else None
-        return None
-
     def add_avi_section(self, name, format, number, start_sync_time):
+        """
+        Add an [avi] section to the VBOX file and also the required related columns:
+        - avifileindex
+        - avitime
+        """
         if '[avi]' not in self.sections:
             self.sections['[avi]'] = []
             self.sections['[avi]'].append(f'{name}')
             self.sections['[avi]'].append(f'{format}')
 
-        # Add 'avifileindex' to [header] section if not present
-        if 'avifileindex' not in [h.strip() for h in self.header_columns]:
-            self.header_columns.append('avifileindex')
+        def add_avitime_column(data):
+            """
+            Add 'avitime' column to the data section if it does not exists.
+            Computed using the difference between consecutive time values.
+            """
+            if 'avitime' not in data:
+                data['avitime'] = []
+                prev_time = None
+                for i in range(self.nval):
+                    time_value_ms = hhmmsscc_to_milliseconds(data['time'][i])
+                    if prev_time is not None:
+                        avitime += time_value_ms - prev_time
+                    else:
+                        avitime = start_sync_time
+                    avitime_str = pad_with_zeros(avitime, 9)
+                    data['avitime'].append(avitime_str)
+                    prev_time = time_value_ms
+            return data
 
         # Add 'avifileindex' to [column names] section if not present
-        if 'avifileindex' not in self.column_names:
-            self.column_names.append('avifileindex')
-
+        if 'avifileindex' not in self.sections['[data]']:
             # Add 'avifileindex' column to data
             number_str = pad_with_zeros(number, 4)
             self.add_constant_column('avifileindex', 'avifileindex', str(number_str))
 
-        # Add 'avitime' to [header] section if not present
-        if 'avisynctime' not in [h.strip() for h in self.header_columns]:
-            self.header_columns.append('avisynctime')
-
-        # Add 'avitime' to [column names] section if not present
-        if 'avitime' not in self.column_names:
-            self.column_names.append('avitime')
-
-            # Add 'avitime' column to data
-            i = 0
-            prev_time = None
-            for line in self.sections['[data]']:
-                time_value_ms = hhmmsscc_to_milliseconds(self.__get_column_value(line, 'time'))
-                if prev_time is not None:
-                    avitime += time_value_ms - prev_time
-                else:
-                    avitime = start_sync_time
-                avitime_str = pad_with_zeros(avitime, 9)
-                new_line = f"{line} {avitime_str}"
-                self.sections['[data]'][i] = new_line
-                i += 1
-                prev_time = time_value_ms
-
+        if 'avisynctime' not in self.sections['[data]']:
+            self.add_computed_column('avisynctime', add_avitime_column)
 
         self.__move_section('[avi]', '[laptiming]')
 
@@ -139,34 +148,45 @@ class VboxFile:
         """
         Remove a column from the data section and update relevant metadata.
         """
-        if data_column_name in self.column_names:
-            self.column_names.remove(data_column_name)
+        if data_column_name in self.sections['[column names]']:
+            self.sections['[column names]'].remove(data_column_name)
 
-        if header_column_name in [h.strip() for h in self.header_columns]:
-            self.header_columns.remove(header_column_name)
+        if header_column_name in self.sections['[header]']:
+            self.sections['[header]'].remove(header_column_name)
 
         # Remove the column from the data section
-        for i, line in enumerate(self.sections['[data]']):
-            columns = line.split()
-            if data_column_name in self.column_names:
-                index = self.column_names.index(data_column_name)
-                if index < len(columns):
-                    columns.pop(index)
-            self.sections['[data]'][i] = ' '.join(columns)
+        if data_column_name in self.sections['[data]']:
+            self.sections['[data]'].pop(data_column_name)
 
     def add_constant_column(self, header_column_name, data_column_name, constant_value):
         """
         Add a constant column to the data section.
         """
-        if header_column_name not in [h.strip() for h in self.header_columns]:
-            self.header_columns.append(header_column_name)
 
-        if data_column_name not in self.column_names:
-            self.column_names.append(data_column_name)
+        def constant_function(data):
+            data[data_column_name] = [constant_value] * self.nval
+            return data
 
-        # Add the constant value to each line in the data section
-        for i, line in enumerate(self.sections['[data]']):
-            self.sections['[data]'][i] = f"{line} {constant_value}"
+        if data_column_name not in self.sections['[data]']:
+            self.add_computed_column(header_column_name, constant_function)
+
+    def add_computed_column(self, header_column_name, compute_function):
+        """
+        Add a computed column to the data section using the compute function.
+        The compute function takes the data ordered dict as input and must
+        return the updated data ordered dict including the new column.
+        """
+        if header_column_name not in self.sections['[header]']:
+            self.sections['[header]'].append(header_column_name)
+
+        self.sections['[data]'] = compute_function(self.sections['[data]'])
+
+        # Find out which column has been added
+        new_columns = [col for col in self.sections['[data]'] if col not in self.sections['[column names]']]
+        if len(new_columns) != 1:
+            raise ValueError("Computed column must add exactly one new column.")
+        else:
+            self.sections['[column names]'].append(new_columns[0])
 
 def pad_with_zeros(number, total_length):
     return str(number).zfill(total_length)
