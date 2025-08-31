@@ -121,17 +121,16 @@ class VboxFile:
             """
             if 'avitime' not in data:
                 data['avitime'] = []
-                prev_time: Optional[int] = None
                 for i in range(self.nval):
-                    time_value_ms = hhmmsscc_to_milliseconds(data['time'][i])
-                    if prev_time is not None:
-                        avitime += time_value_ms - prev_time
-                    else:
+                    if i == 0:
                         avitime = start_sync_time
+                    else:
+                        prev_time_ms = hhmmsscc_to_milliseconds(data['time'][i - 1])
+                        curr_time_ms = hhmmsscc_to_milliseconds(data['time'][i])
+                        avitime += curr_time_ms - prev_time_ms
                     avitime_str = pad_with_zeros(avitime, 9)
                     data['avitime'].append(avitime_str)
-                    prev_time = time_value_ms
-            return data
+                return data
 
         # Add 'avifileindex' to [column names] section if not present
         if 'avifileindex' not in self.sections['[data]']:
