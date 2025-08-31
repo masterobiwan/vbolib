@@ -1,18 +1,18 @@
 from collections import OrderedDict
+from typing import Callable, Dict, List, Optional, Any
+from functools import partial
 
 class VboxFile:
 
-    def __init__(self, filepath):
+    def __init__(self, filepath: str) -> None:
         """
         Initialize VboxFile with the given file path.
         Save all sections in plain text except the ones we intend to modify.
         """
-
-        self.filepath = filepath
-
-        self.sections = OrderedDict()
-        self.nval = 0
-        section = None
+        self.filepath: str = filepath
+        self.sections: OrderedDict[str, Any] = OrderedDict()
+        self.nval: int = 0
+        section: Optional[str] = None
 
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
@@ -46,7 +46,7 @@ class VboxFile:
                         # For lines before any section (file header)
                         self.sections.setdefault('file_header', []).append(line)
 
-    def write(self, filepath):
+    def write(self, filepath: str) -> None:
         """
         Write the VBOX file content to the specified file path.
         """
@@ -81,7 +81,7 @@ class VboxFile:
                         f.write(line + '\n')
                     f.write('\n')
 
-    def __move_section(self, section_to_move, after_section):
+    def __move_section(self, section_to_move: str, after_section: str) -> None:
         """
         Move section_to_move in sections OrderedDict to be after after_section.
         """
@@ -103,7 +103,7 @@ class VboxFile:
         # Rebuild OrderedDict
         self.sections = OrderedDict(items)
 
-    def add_avi_section(self, name, format, number, start_sync_time):
+    def add_avi_section(self, name: str, format: str, number: int, start_sync_time: int) -> None:
         """
         Add an [avi] section to the VBOX file and also the required related columns:
         - avifileindex
@@ -114,14 +114,14 @@ class VboxFile:
             self.sections['[avi]'].append(f'{name}')
             self.sections['[avi]'].append(f'{format}')
 
-        def add_avitime_column(data):
+        def add_avitime_column(data: OrderedDict[str, List[str]], start_sync_time: int) -> OrderedDict[str, List[str]]:
             """
             Add 'avitime' column to the data section if it does not exists.
             Computed using the difference between consecutive time values.
             """
             if 'avitime' not in data:
                 data['avitime'] = []
-                prev_time = None
+                prev_time: Optional[int] = None
                 for i in range(self.nval):
                     time_value_ms = hhmmsscc_to_milliseconds(data['time'][i])
                     if prev_time is not None:
@@ -135,16 +135,15 @@ class VboxFile:
 
         # Add 'avifileindex' to [column names] section if not present
         if 'avifileindex' not in self.sections['[data]']:
-            # Add 'avifileindex' column to data
             number_str = pad_with_zeros(number, 4)
             self.add_constant_column('avifileindex', 'avifileindex', str(number_str))
 
         if 'avisynctime' not in self.sections['[data]']:
-            self.add_computed_column('avisynctime', add_avitime_column)
+            self.add_computed_column('avisynctime', partial(add_avitime_column, start_sync_time=start_sync_time))
 
         self.__move_section('[avi]', '[laptiming]')
 
-    def remove_column(self, header_column_name, data_column_name):
+    def remove_column(self, header_column_name: str, data_column_name: str) -> None:
         """
         Remove a column from the data section and update relevant metadata.
         """
@@ -158,19 +157,23 @@ class VboxFile:
         if data_column_name in self.sections['[data]']:
             self.sections['[data]'].pop(data_column_name)
 
-    def add_constant_column(self, header_column_name, data_column_name, constant_value):
+    def add_constant_column(self, header_column_name: str, data_column_name: str, constant_value: str) -> None:
         """
         Add a constant column to the data section.
         """
 
-        def constant_function(data):
+        def constant_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
             data[data_column_name] = [constant_value] * self.nval
             return data
 
         if data_column_name not in self.sections['[data]']:
             self.add_computed_column(header_column_name, constant_function)
 
-    def add_computed_column(self, header_column_name, compute_function):
+    def add_computed_column(
+        self,
+        header_column_name: str,
+        compute_function: Callable[[OrderedDict[str, List[str]]], OrderedDict[str, List[str]]]
+    ) -> None:
         """
         Add a computed column to the data section using the compute function.
         The compute function takes the data ordered dict as input and must
@@ -188,10 +191,10 @@ class VboxFile:
         else:
             self.sections['[column names]'].append(new_columns[0])
 
-def pad_with_zeros(number, total_length):
+def pad_with_zeros(number: int, total_length: int) -> str:
     return str(number).zfill(total_length)
 
-def hhmmsscc_to_milliseconds(timestr):
+def hhmmsscc_to_milliseconds(timestr: str) -> int:
     # Ensure string is zero-padded and split into parts
     timestr = timestr.strip()
     if '.' in timestr:
