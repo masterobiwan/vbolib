@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Any
 from functools import partial
+import math
 
 class VboxFile:
 
@@ -190,8 +191,71 @@ class VboxFile:
         else:
             self.sections['[column names]'].append(new_columns[0])
 
+    def add_gps_heading_column(self) -> None:
+        """
+        Add a GPS heading column to the data section.
+        """
+        
+        def gps_heading_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
+            if 'heading_gps' not in data:
+                raw_headings = []
+                for i in range(self.nval):
+                    if i == 0:
+                        heading = 0.0
+                    else:
+                        lat1 = float(data['lat'][i - 1])
+                        lon1 = float(data['lng'][i - 1])
+                        lat2 = float(data['lat'][i])
+                        lon2 = float(data['lng'][i])
+                        heading = compute_heading(lat1, lon1, lat2, lon2)
+                    raw_headings.append(heading)
+
+                # Apply moving average smoothing (window size = 5, can be adjusted)
+                window = 5
+                smoothed_headings = []
+                for i in range(self.nval):
+                    start = max(0, i - window // 2)
+                    end = min(self.nval, i + window // 2 + 1)
+                    # Handle wrap-around for heading (circular mean)
+                    segment = raw_headings[start:end]
+                    # Convert to radians for circular mean
+                    segment_rad = [math.radians(h) for h in segment]
+                    mean_sin = sum(math.sin(h) for h in segment_rad) / len(segment_rad)
+                    mean_cos = sum(math.cos(h) for h in segment_rad) / len(segment_rad)
+                    mean_angle = math.atan2(mean_sin, mean_cos)
+                    mean_heading = (math.degrees(mean_angle) + 360) % 360
+                    smoothed_headings.append(mean_heading)
+
+                data['heading_gps'] = [format_heading(h) for h in smoothed_headings]
+            return data
+            
+        def compute_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+            """
+            Compute heading in degrees from point 1 (lat1, lon1) to point 2 (lat2, lon2).
+            Heading is 0° = North, 90° = East, 180° = South, 270° = West.
+            """
+            dlon = lon2 - lon1
+            lat1_rad = lat1
+            lat2_rad = lat2
+            x = math.sin(dlon) * math.cos(lat2_rad)
+            y = math.cos(lat1_rad) * math.sin(lat2_rad) - \
+                math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon)
+            initial_bearing = math.atan2(x, y)
+            # Convert from radians to degrees and normalize
+            bearing = (360 - math.degrees(initial_bearing)) % 360
+            return bearing
+        
+
+        self.add_computed_column('gps_heading', gps_heading_function)
+
 def pad_with_zeros(number: int, total_length: int) -> str:
     return str(number).zfill(total_length)
+
+def format_heading(heading: float) -> str:
+    """
+    Format the heading in degrees as a string: xyz.abc (3 digits before, 3 after decimal).
+    """
+    return f"{heading:05.2f}"
 
 def hhmmsscc_to_milliseconds(timestr: str) -> int:
     # Ensure string is zero-padded and split into parts
