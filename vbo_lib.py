@@ -1,11 +1,12 @@
 from collections import OrderedDict
+import logging
 from typing import Callable, List, Optional, Any
 from functools import partial
 import math
 
 class VboFile:
     """
-    Parser and writer for Racelogic/VBox .vbo files.
+    Parser, editor, and writer for Racelogic/VBox .vbo files.
 
     Attributes:
         filepath (str): Path to the source .vbo file.
@@ -22,16 +23,10 @@ class VboFile:
         Parameters:
             filepath (str): Path to the .vbo file to parse.
 
-        Behavior:
-            - Parses section headers (lines like '[header]', '[column names]', '[data]', etc.).
-            - Stores non-[data] sections as lists of their lines.
-            - Stores the [data] section as an OrderedDict mapping column name -> list of string values.
-            - Tracks the number of data rows in self.nval.
-
         Raises:
             ValueError: If multiple [column names] lines are found.
         """
-        # ...existing code...
+
         self.filepath: str = filepath
         self.sections: OrderedDict[str, Any] = OrderedDict()
         self.nval: int = 0
@@ -75,13 +70,7 @@ class VboFile:
 
         Parameters:
             filepath (str): Destination file path where the .vbo content will be written.
-
-        Behavior:
-            - Preserves all sections and most original formatting.
-            - Writes '[column names]' followed by exactly one blank line before '[data]'.
-            - Writes the [data] section using values stored in self.sections['[data]'].
         """
-        # ...existing code...
         with open(filepath, 'w', encoding='utf-8') as f:
             for section, lines in self.sections.items():
                 if section == 'file_header':
@@ -124,8 +113,9 @@ class VboFile:
         Notes:
             - If either key is missing, the method does nothing.
         """
-        # ...existing code...
+
         if section_to_move not in self.sections or after_section not in self.sections:
+            logging.warning(f"Cannot move section {section_to_move} after {after_section}: one of the sections is missing.")
             return
 
         items = list(self.sections.items())
@@ -153,14 +143,8 @@ class VboFile:
             number (int): Integer index to store in the 'avifileindex' data column.
             start_sync_time (int): Initial avitime value (typically milliseconds) used to sync the first frame.
             time_column (str): Name of the time column in the data section (default 'time').
-
-        Behavior:
-            - Creates the [avi] section if not present.
-            - Adds an 'avifileindex' constant column (zero-padded to 4 digits).
-            - Adds an 'avisynctime' computed column (avitime) that accumulates time deltas.
-            - Moves the [avi] section to follow '[laptiming]' in the output order.
         """
-        # ...existing code...
+        
         if '[avi]' not in self.sections:
             self.sections['[avi]'] = []
             self.sections['[avi]'].append(f'{video_file_name}')
@@ -213,13 +197,8 @@ class VboFile:
         Parameters:
             header_column_name (str): The human-readable header entry to remove (e.g. 'heading').
             data_column_name (str): The data column key to remove from [column names] and [data].
-
-        Behavior:
-            - Removes the column name from '[column names]' list.
-            - Removes the header entry from the '[header]' section if present.
-            - Removes the data column from the internal '[data]' mapping.
         """
-        # ...existing code...
+        
         if data_column_name in self.sections['[column names]']:
             self.sections['[column names]'].remove(data_column_name)
 
@@ -239,7 +218,6 @@ class VboFile:
             data_column_name (str): Column key to add to the '[data]' mapping and '[column names]'.
             constant_value (str): String value to use for every row in the new column.
         """
-        # ...existing code...
 
         def constant_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
             data[data_column_name] = [constant_value] * self.nval
@@ -261,13 +239,17 @@ class VboFile:
             compute_function (Callable): Function that accepts the current data OrderedDict and
                 returns the updated data OrderedDict including exactly one new data column.
 
-        Behavior:
-            - Appends header_column_name to [header] if not present.
-            - Replaces self.sections['[data]'] with the compute function output.
-            - Validates that the compute function added exactly one new column, and appends its
-              data column name to '[column names]'.
+        Help on compute_function:
+            The compute_function should have the signature:
+                def compute_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
+            It should add exactly one new column to the data mapping and return the updated mapping.
+            The new column should have the same number of rows as existing columns.
+
+            data OrderedDict details:
+                Keys: data column names (strings). Order matters — iteration order defines the field order when writing rows.
+                Values: lists of strings. Each string is the textual representation as it will be written to the .vbo file (keep leading zeros, signs, width, decimals, etc.).
         """
-        # ...existing code...
+        
         if header_column_name not in self.sections['[header]']:
             self.sections['[header]'].append(header_column_name)
 
@@ -288,13 +270,8 @@ class VboFile:
             heading_col (str): Name of the new heading data column (default 'heading_gps').
             long_col (str): Name of the longitude column in data (default 'long').
             lat_col (str): Name of the latitude column in data (default 'lat').
-
-        Behavior:
-            - Computes the heading (degrees clockwise from North) between consecutive GPS points.
-            - Applies a circular moving-average smoothing to reduce jitter.
-            - Formats each heading with format_heading() and adds it as a new data column.
         """
-        # ...existing code...
+        
         def gps_heading_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
             if heading_col not in data:
                 raw_headings = []
