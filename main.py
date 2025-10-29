@@ -1,4 +1,4 @@
-from vbox_file import VboFile, format_heading, hhmmsscc_to_milliseconds
+from vbo_lib import VboFile, format_heading, hhmmsscc_to_milliseconds
 
 
 # Parse the VBOX file
