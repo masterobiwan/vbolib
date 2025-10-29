@@ -16,7 +16,7 @@ Lightweight library to parse, edit and write Racelogic/VBox `.vbo` telemetry fil
 ## Quick usage
 
 ```python
-from vbo_lib import VboFile
+from vbolib import VboFile
 
 vbo_file = VboFile(r'C:\path\to\session.vbo')
 vbo_file.add_rotation_speed_from_heading_column()   # compute rotation speed from heading
