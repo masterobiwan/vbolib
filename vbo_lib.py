@@ -3,6 +3,7 @@ import logging
 from typing import Callable, List, Optional, Any
 from functools import partial
 import math
+import numpy as np
 
 class VboFile:
     """
@@ -205,7 +206,6 @@ class VboFile:
         if header_column_name in self.sections['[header]']:
             self.sections['[header]'].remove(header_column_name)
 
-        # Remove the column from the data section
         if data_column_name in self.sections['[data]']:
             self.sections['[data]'].pop(data_column_name)
 
@@ -239,6 +239,10 @@ class VboFile:
             compute_function (Callable): Function that accepts the current data OrderedDict and
                 returns the updated data OrderedDict including exactly one new data column.
 
+        Raises:
+            ValueError: If the computed column does not add exactly one new column.
+            ValueError: If the header column already exists.
+
         Help on compute_function:
             The compute_function should have the signature:
                 def compute_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
@@ -252,6 +256,8 @@ class VboFile:
         
         if header_column_name not in self.sections['[header]']:
             self.sections['[header]'].append(header_column_name)
+        else:
+            raise ValueError(f"Header column {header_column_name} already exists in headers.")
 
         self.sections['[data]'] = compute_function(self.sections['[data]'])
 
@@ -262,47 +268,50 @@ class VboFile:
         else:
             self.sections['[column names]'].append(new_columns[0])
 
-    def add_gps_heading_column(self, heading_col: str = 'heading_gps', long_col: str = 'long', lat_col: str = 'lat') -> None:
+    def add_gps_heading_column(self, heading_column: str = 'heading_gps', long_column: str = 'long', lat_column: str = 'lat', smoothing_window: int = 5) -> None:
         """
         Compute and add a GPS-derived heading column.
 
         Parameters:
-            heading_col (str): Name of the new heading data column (default 'heading_gps').
+            heading_column (str): Name of the new heading data column (default 'heading_gps').
             long_col (str): Name of the longitude column in data (default 'long').
             lat_col (str): Name of the latitude column in data (default 'lat').
+            smoothing_window (int): Moving-average window size for heading smoothing (odd recommended). Defaults to 5.
         """
+
+        if heading_column in self.sections['[data]']:
+            logging.warning(f"Column {heading_column} already exists. Skipping GPS heading computation.")
+            return
         
         def gps_heading_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
-            if heading_col not in data:
+            if heading_column not in data:
                 raw_headings = []
                 for i in range(self.nval):
                     if i == 0:
                         heading = 0.0
                     else:
-                        lat1 = float(data[lat_col][i - 1])
-                        lon1 = float(data[long_col][i - 1])
-                        lat2 = float(data[lat_col][i])
-                        lon2 = float(data[long_col][i])
+                        lat1 = float(data[lat_column][i - 1])
+                        lon1 = float(data[long_column][i - 1])
+                        lat2 = float(data[lat_column][i])
+                        lon2 = float(data[long_column][i])
                         heading = compute_heading(lat1, lon1, lat2, lon2)
                     raw_headings.append(heading)
 
-                # Apply moving average smoothing (window size = 5, can be adjusted)
-                window = 5
-                smoothed_headings = []
-                for i in range(self.nval):
-                    start = max(0, i - window // 2)
-                    end = min(self.nval, i + window // 2 + 1)
-                    # Handle wrap-around for heading (circular mean)
-                    segment = raw_headings[start:end]
-                    # Convert to radians for circular mean
-                    segment_rad = [math.radians(h) for h in segment]
-                    mean_sin = sum(math.sin(h) for h in segment_rad) / len(segment_rad)
-                    mean_cos = sum(math.cos(h) for h in segment_rad) / len(segment_rad)
-                    mean_angle = math.atan2(mean_sin, mean_cos)
-                    mean_heading = (math.degrees(mean_angle) + 360) % 360
-                    smoothed_headings.append(mean_heading)
+                # Apply moving average smoothing
+                if len(raw_headings) == 0:
+                    smoothed_headings = []
+                else:
+                    # convert degrees -> radians, build unit phasors
+                    raw_rad = np.deg2rad(np.asarray(raw_headings, dtype=float))
+                    phasors = np.exp(1j * raw_rad)
+                    # uniform kernel and convolution (same length output)
+                    kernel = np.ones(smoothing_window, dtype=float) / smoothing_window
+                    smoothed_phasors = np.convolve(phasors, kernel, mode='same')
+                    # extract angle, convert to degrees and normalize
+                    smoothed_headings = ((np.degrees(np.angle(smoothed_phasors)) + 360.0) % 360.0).tolist()
 
-                data[heading_col] = [format_heading(h) for h in smoothed_headings]
+                data[heading_column] = [format_heading(h) for h in smoothed_headings]
+
             return data
             
         def compute_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -318,19 +327,147 @@ class VboFile:
             Returns:
                 float: Bearing (heading) in degrees clockwise from North in range [0, 360).
             """
-            dlon = lon2 - lon1
-            lat1_rad = lat1
-            lat2_rad = lat2
-            x = math.sin(dlon) * math.cos(lat2_rad)
+            # convert degrees to radians
+            lat1_rad = math.radians(lat1)
+            lat2_rad = math.radians(lat2)
+            dlon_rad = math.radians(lon2 - lon1)
+
+            x = math.sin(dlon_rad) * math.cos(lat2_rad)
             y = math.cos(lat1_rad) * math.sin(lat2_rad) - \
-                math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon)
+                math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon_rad)
+
             initial_bearing = math.atan2(x, y)
-            # Convert from radians to degrees and normalize
-            bearing = (360 - math.degrees(initial_bearing)) % 360
+            # Convert from radians to degrees and normalize to [0,360)
+            bearing = (math.degrees(initial_bearing) + 360.0) % 360.0
+
             return bearing
         
 
-        self.add_computed_column(heading_col, gps_heading_function)
+        self.add_computed_column(heading_column, gps_heading_function)
+
+    def add_rotation_speed_from_heading_column(
+        self,
+        time_column: str = 'time',
+        heading_column: str = 'heading_gps',
+        rotation_speed_column: str = 'rotation_speed_deg_per_s',
+        smoothing_window: int = 9
+    ) -> None:
+        """
+        Add a rotation speed (yaw rate) column computed from heading column.
+
+        Parameters:
+            time_column (str): Name of the time column in HHMMSS.CC format (default 'time').
+            heading_column (str): Name of the heading column to read (degrees, default 'heading').
+            rotation_speed_column (str): Name of the data column to create (default 'rotation_speed_deg_per_s').
+            smoothing_window (int): Moving-average window size (odd recommended). Defaults to 9.
+
+        Raises:
+            KeyError: If time_column is missing from the data.
+        
+        Notes for compute_function implementers/users:
+            - The method will raise a KeyError if heading_column or time_column are missing from the data.
+            - The returned data mapping will include exactly one new column (rotation_speed_column) with string values,
+              each list having the same length self.nval.
+        """
+
+        if rotation_speed_column in self.sections['[data]']:
+            logging.warning(f"Column {rotation_speed_column} already exists. Skipping rotation speed computation.")
+            return
+        
+        if time_column not in self.sections['[data]']:
+            raise KeyError(f"Time column '{time_column}' not found in data.")
+        
+        remove_heading_column = False
+        if heading_column not in self.sections['[data]']:
+            self.add_gps_heading_column(heading_column=heading_column)
+            remove_heading_column = True
+
+        def compute_rotation_speed(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
+            nval = len(next(iter(data.values()))) if data else 0
+            raw_rotation_speeds: List[float] = []
+            for i in range(nval):
+                if i == 0:
+                    raw_rotation_speeds.append(0.0)
+                else:
+                    prev_heading = float(data[heading_column][i - 1])
+                    curr_heading = float(data[heading_column][i])
+                    # shortest angle difference in degrees (-180, +180]
+                    delta_heading = (curr_heading - prev_heading + 540.0) % 360.0 - 180.0
+                    prev_time = hhmmsscc_to_milliseconds(data[time_column][i - 1]) / 1000.0
+                    curr_time = hhmmsscc_to_milliseconds(data[time_column][i]) / 1000.0
+                    dt = curr_time - prev_time if curr_time != prev_time else 1e-6
+                    raw_rotation_speeds.append(delta_heading / dt)
+            # smoothing (moving average)
+            window = max(1, int(smoothing_window))
+            smoothed: List[str] = []
+            for i in range(nval):
+                start = max(0, i - window // 2)
+                end = min(nval, i + window // 2 + 1)
+                smoothed_val = sum(raw_rotation_speeds[start:end]) / (end - start)
+                smoothed.append(f"{smoothed_val:.2f}")
+            data[rotation_speed_column] = smoothed
+            return data
+
+        self.add_computed_column(rotation_speed_column, compute_rotation_speed)
+
+        if remove_heading_column:
+            self.remove_column(heading_column, heading_column)
+
+    def add_oversteer_column(
+        self,
+        rotation_speed_column: str = 'rotation_speed_deg_per_s',
+        gyro_z_column: str = 'z_rate_of_rotation-gyro',
+        oversteer_column: str = 'oversteer'
+    ) -> None:
+        """
+        Add an 'oversteer' computed column representing the difference between GPS based rotation to gyroscope z-axis rotation.
+        Unit: deg/s.
+        Convention:
+            - positive value indicates oversteer.
+            - negative value indicates understeer.
+
+        Parameters:
+            rotation_speed_column (str): Name of the rotation speed column in deg/s (default 'rotation_speed_deg_per_s').
+            gyro_z_column (str): Name of the z-rotation gyroscope column (default 'z_rate_of_rotation-gyro').
+            oversteer_column (str): Name of the oversteer column to create (default 'oversteer').
+
+        Raises:
+            KeyError: If gyro_z_column is missing from the data.
+
+        Notes:
+            - Both input columns must exist in the data OrderedDict; otherwise KeyError is raised.
+        """
+
+        if oversteer_column in self.sections['[data]']:
+            logging.warning(f"Column {oversteer_column} already exists. Skipping oversteer computation.")
+            return
+        
+        if gyro_z_column not in self.sections['[data]']:
+            raise KeyError(f"Gyro Z column '{gyro_z_column}' not found in data.")
+        
+        remove_rotation_column = False
+        if rotation_speed_column not in self.sections['[data]']:
+            self.add_rotation_speed_from_heading_column(rotation_speed_column=rotation_speed_column)
+            remove_rotation_column = True
+
+        def compute_oversteer(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
+            nval = len(next(iter(data.values()))) if data else 0
+            data[oversteer_column] = []
+            for i in range(nval):
+                if i == 0:
+                    over_val = 0.0
+                else:
+                    rot = float(data[rotation_speed_column][i])
+                    gyro_z = float(data[gyro_z_column][i])
+                    over_val = rot + gyro_z # gyro_z is typically negative for clockwise rotation
+                data[oversteer_column].append(format_heading(over_val))
+            return data
+
+        self.add_computed_column(oversteer_column, compute_oversteer)
+
+        if remove_rotation_column:
+            self.remove_column(rotation_speed_column, rotation_speed_column)
+
 
 def pad_with_zeros(number: int, total_length: int) -> str:
     """
