@@ -1,12 +1,12 @@
-from vbox_file import VboxFile, format_heading, hhmmsscc_to_milliseconds
+from vbox_file import VboFile, format_heading, hhmmsscc_to_milliseconds
 
 
 # Parse the VBOX file
-filepath = r'C:\Users\Benoît\Documents\vbox\2025-08-22\RaceBox Track Sessionon 22-08-2025 10-45.vbo'
-vbox_file = VboxFile(filepath)
+filepath = r'C:\Users\Benoît\Documents\vbox\2025-10-04\session_20251004_114309_silverstone_international.vbo'
+vbox_file = VboFile(filepath)
 
 # Add avi file section
-vbox_file.add_avi_section('video_', 'mp4', 1, 3355)
+# vbox_file.add_avi_section('video_', 'MOV', 3, -300000)
 
 # Remove column
 # vbox_file.remove_column('VertAcc', 'VertAcc')
@@ -54,12 +54,12 @@ def oversteer(data):
             if i == 0:
                 oversteer = 0.0
             else:
-                oversteer = float(data['rotation_speed_deg_per_s'][i]) + float(data['z-rotation-gyroscope'][i])
+                oversteer = float(data['rotation_speed_deg_per_s'][i]) + float(data['z_rate_of_rotation-gyro'][i])
             data['oversteer'].append(format_heading(oversteer))
         return data
 
 vbox_file.add_computed_column('oversteer', oversteer)
 
 # Write to new file
-filepath_new = r'C:\Users\Benoît\Documents\vbox\2025-08-22\RaceBox Track Sessionon 22-08-2025 10-45_modified.vbo'
+filepath_new = r'C:\Users\Benoît\Documents\vbox\2025-10-04\session_20251004_114309_silverstone_international_modified.vbo'
 vbox_file.write(filepath_new)

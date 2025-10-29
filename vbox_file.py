@@ -1,15 +1,37 @@
 from collections import OrderedDict
-from typing import Callable, Dict, List, Optional, Any
+from typing import Callable, List, Optional, Any
 from functools import partial
 import math
 
-class VboxFile:
+class VboFile:
+    """
+    Parser and writer for Racelogic/VBox .vbo files.
+
+    Attributes:
+        filepath (str): Path to the source .vbo file.
+        sections (OrderedDict[str, Any]): Parsed sections of the file. Section names are keys
+            (including their surrounding brackets, e.g. '[data]') and values contain the raw
+            content for that section (lists of lines or OrderedDict for data).
+        nval (int): Number of data rows parsed from the [data] section.
+    """
 
     def __init__(self, filepath: str) -> None:
         """
-        Initialize VboxFile with the given file path.
-        Save all sections in plain text except the ones we intend to modify.
+        Initialize a VboFile by reading and parsing a .vbo file.
+
+        Parameters:
+            filepath (str): Path to the .vbo file to parse.
+
+        Behavior:
+            - Parses section headers (lines like '[header]', '[column names]', '[data]', etc.).
+            - Stores non-[data] sections as lists of their lines.
+            - Stores the [data] section as an OrderedDict mapping column name -> list of string values.
+            - Tracks the number of data rows in self.nval.
+
+        Raises:
+            ValueError: If multiple [column names] lines are found.
         """
+        # ...existing code...
         self.filepath: str = filepath
         self.sections: OrderedDict[str, Any] = OrderedDict()
         self.nval: int = 0
@@ -49,8 +71,17 @@ class VboxFile:
 
     def write(self, filepath: str) -> None:
         """
-        Write the VBOX file content to the specified file path.
+        Write the VBOX content back to a file.
+
+        Parameters:
+            filepath (str): Destination file path where the .vbo content will be written.
+
+        Behavior:
+            - Preserves all sections and most original formatting.
+            - Writes '[column names]' followed by exactly one blank line before '[data]'.
+            - Writes the [data] section using values stored in self.sections['[data]'].
         """
+        # ...existing code...
         with open(filepath, 'w', encoding='utf-8') as f:
             for section, lines in self.sections.items():
                 if section == 'file_header':
@@ -84,8 +115,16 @@ class VboxFile:
 
     def __move_section(self, section_to_move: str, after_section: str) -> None:
         """
-        Move section_to_move in sections OrderedDict to be after after_section.
+        Move a section in the internal OrderedDict to a new position.
+
+        Parameters:
+            section_to_move (str): Section key to move (including brackets), e.g. '[avi]'.
+            after_section (str): The section key after which section_to_move should be inserted.
+
+        Notes:
+            - If either key is missing, the method does nothing.
         """
+        # ...existing code...
         if section_to_move not in self.sections or after_section not in self.sections:
             return
 
@@ -104,30 +143,54 @@ class VboxFile:
         # Rebuild OrderedDict
         self.sections = OrderedDict(items)
 
-    def add_avi_section(self, name: str, format: str, number: int, start_sync_time: int) -> None:
+    def add_avi_section(self, video_file_name: str, format: str, number: int, start_sync_time: int, time_column: str = 'time') -> None:
         """
-        Add an [avi] section to the VBOX file and also the required related columns:
-        - avifileindex
-        - avitime
+        Add an [avi] section and required data/header columns.
+
+        Parameters:
+            video_file_name (str): Base name for the video file to write into the [avi] section.
+            format (str): Video format string (e.g. 'mp4').
+            number (int): Integer index to store in the 'avifileindex' data column.
+            start_sync_time (int): Initial avitime value (typically milliseconds) used to sync the first frame.
+            time_column (str): Name of the time column in the data section (default 'time').
+
+        Behavior:
+            - Creates the [avi] section if not present.
+            - Adds an 'avifileindex' constant column (zero-padded to 4 digits).
+            - Adds an 'avisynctime' computed column (avitime) that accumulates time deltas.
+            - Moves the [avi] section to follow '[laptiming]' in the output order.
         """
+        # ...existing code...
         if '[avi]' not in self.sections:
             self.sections['[avi]'] = []
-            self.sections['[avi]'].append(f'{name}')
+            self.sections['[avi]'].append(f'{video_file_name}')
             self.sections['[avi]'].append(f'{format}')
 
         def add_avitime_column(data: OrderedDict[str, List[str]], start_sync_time: int) -> OrderedDict[str, List[str]]:
             """
-            Add 'avitime' column to the data section if it does not exists.
-            Computed using the difference between consecutive time values.
+            Compute and add an 'avitime' column to the data section.
+
+            Parameters:
+                data (OrderedDict[str, List[str]]): Current data mapping column->list-of-values.
+                start_sync_time (int): Initial avitime value to use for the first row (milliseconds).
+
+            Returns:
+                OrderedDict[str, List[str]]: The updated data mapping including 'avitime'.
+
+            Notes:
+                - Assumes time_column contains values in HHMMSS.CC format and uses hhmmsscc_to_milliseconds()
+                  to obtain per-row timestamps in milliseconds.
+                - Each avitime value is formatted as a zero-padded string of length 9.
             """
+            # ...existing code...
             if 'avitime' not in data:
                 data['avitime'] = []
                 for i in range(self.nval):
                     if i == 0:
                         avitime = start_sync_time
                     else:
-                        prev_time_ms = hhmmsscc_to_milliseconds(data['time'][i - 1])
-                        curr_time_ms = hhmmsscc_to_milliseconds(data['time'][i])
+                        prev_time_ms = hhmmsscc_to_milliseconds(data[time_column][i - 1])
+                        curr_time_ms = hhmmsscc_to_milliseconds(data[time_column][i])
                         avitime += curr_time_ms - prev_time_ms
                     avitime_str = pad_with_zeros(avitime, 9)
                     data['avitime'].append(avitime_str)
@@ -145,8 +208,18 @@ class VboxFile:
 
     def remove_column(self, header_column_name: str, data_column_name: str) -> None:
         """
-        Remove a column from the data section and update relevant metadata.
+        Remove a column from header, column names and data sections.
+
+        Parameters:
+            header_column_name (str): The human-readable header entry to remove (e.g. 'heading').
+            data_column_name (str): The data column key to remove from [column names] and [data].
+
+        Behavior:
+            - Removes the column name from '[column names]' list.
+            - Removes the header entry from the '[header]' section if present.
+            - Removes the data column from the internal '[data]' mapping.
         """
+        # ...existing code...
         if data_column_name in self.sections['[column names]']:
             self.sections['[column names]'].remove(data_column_name)
 
@@ -159,8 +232,14 @@ class VboxFile:
 
     def add_constant_column(self, header_column_name: str, data_column_name: str, constant_value: str) -> None:
         """
-        Add a constant column to the data section.
+        Add a constant-valued column to the data section.
+
+        Parameters:
+            header_column_name (str): Header entry to add to the '[header]' section.
+            data_column_name (str): Column key to add to the '[data]' mapping and '[column names]'.
+            constant_value (str): String value to use for every row in the new column.
         """
+        # ...existing code...
 
         def constant_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
             data[data_column_name] = [constant_value] * self.nval
@@ -175,10 +254,20 @@ class VboxFile:
         compute_function: Callable[[OrderedDict[str, List[str]]], OrderedDict[str, List[str]]]
     ) -> None:
         """
-        Add a computed column to the data section using the compute function.
-        The compute function takes the data ordered dict as input and must
-        return the updated data ordered dict including the new column.
+        Add a computed column by applying a compute function to the current data.
+
+        Parameters:
+            header_column_name (str): Header name to add to the '[header]' section.
+            compute_function (Callable): Function that accepts the current data OrderedDict and
+                returns the updated data OrderedDict including exactly one new data column.
+
+        Behavior:
+            - Appends header_column_name to [header] if not present.
+            - Replaces self.sections['[data]'] with the compute function output.
+            - Validates that the compute function added exactly one new column, and appends its
+              data column name to '[column names]'.
         """
+        # ...existing code...
         if header_column_name not in self.sections['[header]']:
             self.sections['[header]'].append(header_column_name)
 
@@ -191,22 +280,32 @@ class VboxFile:
         else:
             self.sections['[column names]'].append(new_columns[0])
 
-    def add_gps_heading_column(self) -> None:
+    def add_gps_heading_column(self, heading_col: str = 'heading_gps', long_col: str = 'long', lat_col: str = 'lat') -> None:
         """
-        Add a GPS heading column to the data section.
+        Compute and add a GPS-derived heading column.
+
+        Parameters:
+            heading_col (str): Name of the new heading data column (default 'heading_gps').
+            long_col (str): Name of the longitude column in data (default 'long').
+            lat_col (str): Name of the latitude column in data (default 'lat').
+
+        Behavior:
+            - Computes the heading (degrees clockwise from North) between consecutive GPS points.
+            - Applies a circular moving-average smoothing to reduce jitter.
+            - Formats each heading with format_heading() and adds it as a new data column.
         """
-        
+        # ...existing code...
         def gps_heading_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
-            if 'heading_gps' not in data:
+            if heading_col not in data:
                 raw_headings = []
                 for i in range(self.nval):
                     if i == 0:
                         heading = 0.0
                     else:
-                        lat1 = float(data['lat'][i - 1])
-                        lon1 = float(data['lng'][i - 1])
-                        lat2 = float(data['lat'][i])
-                        lon2 = float(data['lng'][i])
+                        lat1 = float(data[lat_col][i - 1])
+                        lon1 = float(data[long_col][i - 1])
+                        lat2 = float(data[lat_col][i])
+                        lon2 = float(data[long_col][i])
                         heading = compute_heading(lat1, lon1, lat2, lon2)
                     raw_headings.append(heading)
 
@@ -226,13 +325,21 @@ class VboxFile:
                     mean_heading = (math.degrees(mean_angle) + 360) % 360
                     smoothed_headings.append(mean_heading)
 
-                data['heading_gps'] = [format_heading(h) for h in smoothed_headings]
+                data[heading_col] = [format_heading(h) for h in smoothed_headings]
             return data
             
         def compute_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
             """
-            Compute heading in degrees from point 1 (lat1, lon1) to point 2 (lat2, lon2).
-            Heading is 0° = North, 90° = East, 180° = South, 270° = West.
+            Compute heading (bearing) between two lat/lon points.
+
+            Parameters:
+                lat1 (float): Latitude of point 1 in degrees.
+                lon1 (float): Longitude of point 1 in degrees.
+                lat2 (float): Latitude of point 2 in degrees.
+                lon2 (float): Longitude of point 2 in degrees.
+
+            Returns:
+                float: Bearing (heading) in degrees clockwise from North in range [0, 360).
             """
             dlon = lon2 - lon1
             lat1_rad = lat1
@@ -246,19 +353,49 @@ class VboxFile:
             return bearing
         
 
-        self.add_computed_column('gps_heading', gps_heading_function)
+        self.add_computed_column(heading_col, gps_heading_function)
 
 def pad_with_zeros(number: int, total_length: int) -> str:
+    """
+    Zero-pad an integer to a fixed width.
+
+    Parameters:
+        number (int): Integer to format.
+        total_length (int): Total number of digits desired (leading zeros added as needed).
+
+    Returns:
+        str: Zero-padded decimal string.
+    """
     return str(number).zfill(total_length)
 
 def format_heading(heading: float) -> str:
     """
-    Format the heading in degrees as a string: xyz.abc (3 digits before, 3 after decimal).
+    Format heading value for VBO output.
+
+    Parameters:
+        heading (float): Heading in degrees.
+
+    Returns:
+        str: Formatted heading string with 2 decimal places and at least 5 characters,
+             zero-padded as needed (example '012.345').
     """
     return f"{heading:05.2f}"
 
 def hhmmsscc_to_milliseconds(timestr: str) -> int:
-    # Ensure string is zero-padded and split into parts
+    """
+    Convert a time string in HHMMSS.CC format (hours, minutes, seconds, centiseconds)
+    to milliseconds.
+
+    Parameters:
+        timestr (str): Time string in the format 'HHMMSS.CC' (centiseconds). Leading zeros are allowed.
+
+    Returns:
+        int: Total milliseconds corresponding to the input time.
+
+    Example:
+        '094559.96' -> (9 hours, 45 minutes, 59.96 seconds) -> 34,199,960 ms
+    """
+    # ...existing code...
     timestr = timestr.strip()
     if '.' in timestr:
         main, centis = timestr.split('.')
