@@ -2,12 +2,13 @@
 
 Lightweight library to parse, edit and write Racelogic/VBox `.vbo` telemetry files while preserving original text formatting.
 
-## Overview
+## Features
 
-- Parses all `.vbo` sections into an OrderedDict (`self.sections`) preserving order.
-- The `[data]` section is an OrderedDict mapping `column_name -> list[str]` (one string per row).
-- Add computed channels (e.g. GPS heading, rotation speed, oversteer) via helper methods or user-supplied compute functions.
-- Writes a new `.vbo` preserving original formatting (takes care of blank lines and data line formatting).
+- `.vbo` file content parsing.
+- Computed channels (e.g. GPS heading, rotation speed, oversteer) addition via helper methods or user-supplied compute functions.
+- Existing colmun removal.
+- Link `.vbo` file and related video linking.
+- New `.vbo` writing (preserving original formatting).
 
 ## Requirements
 
