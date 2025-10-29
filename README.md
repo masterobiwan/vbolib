@@ -6,7 +6,7 @@ Lightweight library to parse, edit and write Racelogic/VBox `.vbo` telemetry fil
 
 - Parses all `.vbo` sections into an OrderedDict (`self.sections`) preserving order.
 - The `[data]` section is an OrderedDict mapping `column_name -> list[str]` (one string per row).
-- Add computed columns (e.g. GPS heading, rotation speed, oversteer) via helper methods or user-supplied compute functions.
+- Add computed channels (e.g. GPS heading, rotation speed, oversteer) via helper methods or user-supplied compute functions.
 - Writes a new `.vbo` preserving original formatting (takes care of blank lines and data line formatting).
 
 ## Requirements
@@ -24,15 +24,13 @@ vbo_file.add_oversteer_column()                     # compute oversteer from rot
 vbo_file.write(r'C:\path\to\session_modified.vbo')
 ```
 
-## Contract for compute_function (used by add_computed_column)
-- Signature: def compute_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]
-- Input: data is the [data] OrderedDict (as above).
+## Contract for compute functions
+On top of the provided methods, you can add your own computed channels in the `.vbo` file content.
+- Signature: `def compute_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]`
 - Expectations:
-    + Must preserve nval (do not change existing lists length).
-    + Must add exactly one new key -> list[str] pair (unless caller allows more).
-    + New list must have length equal to nval.
+    + New computed channel must have the same number of values (matching existing timestamps).
+    + Must add exactly one new key -> list[str] pair in the `OrderedDict`.
     + Values must be strings formatted for .vbo output.
-- You may mutate and return the same OrderedDict.
 
 Example:
 
