@@ -28,10 +28,10 @@ vbo_file.write(r'C:\path\to\session_modified.vbo')
 - Signature: def compute_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]
 - Input: data is the [data] OrderedDict (as above).
 - Expectations:
-+ Must preserve nval (do not change existing lists length).
-+ Must add exactly one new key -> list[str] pair (unless caller allows more).
-+ New list must have length equal to nval.
-+ Values must be strings formatted for .vbo output.
+    + Must preserve nval (do not change existing lists length).
+    + Must add exactly one new key -> list[str] pair (unless caller allows more).
+    + New list must have length equal to nval.
+    + Values must be strings formatted for .vbo output.
 - You may mutate and return the same OrderedDict.
 
 Example:
