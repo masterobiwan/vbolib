@@ -31,22 +31,34 @@ On top of the provided methods, you can add your own computed channels in the `.
     + New computed channel must have the same number of values (matching existing timestamps).
     + Must add exactly one new key -> list[str] pair in the `OrderedDict`.
     + Values must be strings formatted for .vbo output.
+    + Check that the name of the new channel doesn't already exist in the `OrderedDict` keys.
 
 Example:
 
 ```python
+from vbolib import VboFile
 from collections import OrderedDict
 from typing import List
 
 def compute_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
+
+    new_column = 'new_channel'
+
+    if new_column in data]:
+            raise KeyError(f"New column '{new_column}' already exists in data.")
+
     # nval = number of rows
     nval = len(next(iter(data.values()))) if data else 0
     new_col: List[str] = []
     for i in range(nval):
         # read string values; convert to numeric if needed
-        v_str = data['velocity'][i]
+        v_str = float(data['velocity'][i])
         # compute numeric result, then format
         new_col.append(f"{0.00:.2f}")
-    data['rotation_speed'] = new_col
+    data[new_column] = new_col
     return data
+
+vbo_file = VboFile(r'C:\path\to\session.vbo')
+vbo_file.add_computed_column('new_channel_header', compute_function)   # compute custom channel
+vbo_file.write(r'C:\path\to\session_modified.vbo')
 ```
