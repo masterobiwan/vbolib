@@ -1,4 +1,4 @@
-# compute-vbox-channels
+# vbolib
 
 Lightweight library to parse, edit and write Racelogic/VBox `.vbo` telemetry files while preserving original text formatting.
 
