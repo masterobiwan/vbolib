@@ -25,7 +25,7 @@ vbo_file.write(r'C:\path\to\session_modified.vbo')
 ```
 
 ## Contract for compute functions
-On top of the provided methods, you can add your own computed channels in the `.vbo` file content.
+On top of the provided methods, you can add your own computed channels in the `.vbo` file content using a `compute_function`:
 - Signature: `def compute_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]`
 - Expectations:
     + New computed channel must have the same number of values (matching existing timestamps).
