@@ -64,4 +64,4 @@ vbo_file.add_computed_column('new_channel_header', compute_function)   # compute
 vbo_file.write(r'C:\path\to\session_modified.vbo')
 ```
 
-Examples for compute functions can be found in module `functions.compute.py`.
+Examples for compute functions can be found in module [functions.compute.py](https://github.com/masterobiwan/vbolib/blob/main/functions/compute.py).
