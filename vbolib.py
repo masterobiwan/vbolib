@@ -4,7 +4,7 @@ from typing import Callable, List, Optional, Any
 from functools import partial
 
 from functions.format import pad_with_zeros
-from functions.compute import compute_oversteer, compute_rotation_speed, gps_heading_function, add_avitime_column
+from functions.compute import compute_oversteer, compute_rotation_speed, gps_heading_function, add_avitime_column, compute_fuel_consumption_avg
 
 class VboFile:
     """
@@ -372,3 +372,50 @@ class VboFile:
 
         if remove_rotation_column:
             self.remove_column(rotation_speed_column, rotation_speed_column)
+
+    def add_fuel_consumption_avg_column(
+        self,
+        rpm_column: str = 'rpm-obd',
+        throttle_column: str = 'throttle_pos-obd',
+        intake_temp_column: str = 'intake_temp-obd',
+        time_column: str = 'time',
+        engine_displacement_cc: int = 1596,
+        ve: float = 0.85,
+        lambda_value: float = 1.0,
+        time_window_sec: int = 120,
+        fuel_consumption_column: str = 'fuel_consumption_avg'
+    ) -> None:
+        """
+        Add average fuel consumption (L/min) column based on engine parameters.
+
+        Parameters:
+            rpm_column (str): Name of the RPM column (default 'engine_speed-rpm').
+            throttle_column (str): Name of the throttle position column (default 'throttle_position-throttle').
+            intake_temp_column (str): Name of the intake air temperature column (default 'intake_air_temp-air').
+            time_column (str): Name of the time column in HHMMSS.CC format (default 'time').
+            engine_displacement_cc (int): Engine displacement in cubic centimeters (default 2000 cc).
+            ve (float): Volumetric efficiency (range 0.7-0.95, default 0.85).
+            lambda_value (float): Air-fuel ratio (1.0 for stoichiometric, default 1.0).
+            time_window_sec (int): Time window in seconds for averaging (default 60 seconds).
+            fuel_consumption_column (str): Name of the fuel consumption average column to create (default 'fuel_consumption_avg').
+        """
+
+        if fuel_consumption_column in self.sections['[data]']:
+            logging.warning(f"Column '{fuel_consumption_column}' already exists. Skipping fuel consumption computation.")
+            return
+
+        self.add_computed_column(
+            fuel_consumption_column,
+            partial(
+                compute_fuel_consumption_avg,
+                fuel_consumption_column=fuel_consumption_column,
+                rpm_column=rpm_column,
+                throttle_column=throttle_column,
+                intake_temp_column=intake_temp_column,
+                time_column=time_column,
+                engine_displacement_cc=engine_displacement_cc,
+                ve=ve,
+                lambda_value=lambda_value,
+                time_window_sec=time_window_sec
+            )
+        )

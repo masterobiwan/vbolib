@@ -5,7 +5,7 @@ Lightweight library to parse, edit and write Racelogic/VBox `.vbo` telemetry fil
 ## Features
 
 - `.vbo` file content parsing.
-- Computed channels (e.g. GPS heading, rotation speed, oversteer) addition via helper methods or user-supplied compute functions.
+- Computed channels (e.g. GPS heading, rotation speed, oversteer, fuel consumption) addition via helper methods or user-supplied compute functions.
 - Existing colmun removal.
 - Link `.vbo` file and related video linking.
 - New `.vbo` writing (preserving original formatting).
