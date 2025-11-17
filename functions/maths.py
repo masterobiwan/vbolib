@@ -1,4 +1,3 @@
-
 import math
 
 def compute_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
