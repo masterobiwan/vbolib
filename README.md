@@ -63,3 +63,5 @@ vbo_file = VboFile(r'C:\path\to\session.vbo')
 vbo_file.add_computed_column('new_channel_header', compute_function)   # compute custom channel
 vbo_file.write(r'C:\path\to\session_modified.vbo')
 ```
+
+Examples for compute functions can be found in module `functions.compute.py`.

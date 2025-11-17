@@ -2,8 +2,9 @@ from collections import OrderedDict
 import logging
 from typing import Callable, List, Optional, Any
 from functools import partial
-import math
-import numpy as np
+
+from functions.format import pad_with_zeros
+from functions.compute import compute_oversteer, compute_rotation_speed, gps_heading_function, add_avitime_column
 
 class VboFile:
     """
@@ -151,43 +152,20 @@ class VboFile:
             self.sections['[avi]'].append(f'{video_file_name}')
             self.sections['[avi]'].append(f'{format}')
 
-        def add_avitime_column(data: OrderedDict[str, List[str]], start_sync_time: int) -> OrderedDict[str, List[str]]:
-            """
-            Compute and add an 'avitime' column to the data section.
-
-            Parameters:
-                data (OrderedDict[str, List[str]]): Current data mapping column->list-of-values.
-                start_sync_time (int): Initial avitime value to use for the first row (milliseconds).
-
-            Returns:
-                OrderedDict[str, List[str]]: The updated data mapping including 'avitime'.
-
-            Notes:
-                - Assumes time_column contains values in HHMMSS.CC format and uses hhmmsscc_to_milliseconds()
-                  to obtain per-row timestamps in milliseconds.
-                - Each avitime value is formatted as a zero-padded string of length 9.
-            """
-            # ...existing code...
-            if 'avitime' not in data:
-                data['avitime'] = []
-                for i in range(self.nval):
-                    if i == 0:
-                        avitime = start_sync_time
-                    else:
-                        prev_time_ms = hhmmsscc_to_milliseconds(data[time_column][i - 1])
-                        curr_time_ms = hhmmsscc_to_milliseconds(data[time_column][i])
-                        avitime += curr_time_ms - prev_time_ms
-                    avitime_str = pad_with_zeros(avitime, 9)
-                    data['avitime'].append(avitime_str)
-                return data
-
         # Add 'avifileindex' to [column names] section if not present
         if 'avifileindex' not in self.sections['[data]']:
             number_str = pad_with_zeros(number, 4)
             self.add_constant_column('avifileindex', 'avifileindex', str(number_str))
 
         if 'avisynctime' not in self.sections['[data]']:
-            self.add_computed_column('avisynctime', partial(add_avitime_column, start_sync_time=start_sync_time))
+            self.add_computed_column(
+                'avisynctime',
+                partial(
+                    add_avitime_column,
+                    start_sync_time=start_sync_time,
+                    time_column=time_column
+                )
+            )
 
         self.__move_section('[avi]', '[laptiming]')
 
@@ -282,68 +260,17 @@ class VboFile:
         if heading_column in self.sections['[data]']:
             logging.warning(f"Column {heading_column} already exists. Skipping GPS heading computation.")
             return
-        
-        def gps_heading_function(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
-            if heading_column not in data:
-                raw_headings = []
-                for i in range(self.nval):
-                    if i == 0:
-                        heading = 0.0
-                    else:
-                        lat1 = float(data[lat_column][i - 1])
-                        lon1 = float(data[long_column][i - 1])
-                        lat2 = float(data[lat_column][i])
-                        lon2 = float(data[long_column][i])
-                        heading = compute_heading(lat1, lon1, lat2, lon2)
-                    raw_headings.append(heading)
 
-                # Apply moving average smoothing
-                if len(raw_headings) == 0:
-                    smoothed_headings = []
-                else:
-                    # convert degrees -> radians, build unit phasors
-                    raw_rad = np.deg2rad(np.asarray(raw_headings, dtype=float))
-                    phasors = np.exp(1j * raw_rad)
-                    # uniform kernel and convolution (same length output)
-                    kernel = np.ones(smoothing_window, dtype=float) / smoothing_window
-                    smoothed_phasors = np.convolve(phasors, kernel, mode='same')
-                    # extract angle, convert to degrees and normalize
-                    smoothed_headings = ((np.degrees(np.angle(smoothed_phasors)) + 360.0) % 360.0).tolist()
-
-                data[heading_column] = [format_heading(h) for h in smoothed_headings]
-
-            return data
-            
-        def compute_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-            """
-            Compute heading (bearing) between two lat/lon points.
-
-            Parameters:
-                lat1 (float): Latitude of point 1 in degrees.
-                lon1 (float): Longitude of point 1 in degrees.
-                lat2 (float): Latitude of point 2 in degrees.
-                lon2 (float): Longitude of point 2 in degrees.
-
-            Returns:
-                float: Bearing (heading) in degrees clockwise from North in range [0, 360).
-            """
-            # convert degrees to radians
-            lat1_rad = math.radians(lat1)
-            lat2_rad = math.radians(lat2)
-            dlon_rad = math.radians(lon2 - lon1)
-
-            x = math.sin(dlon_rad) * math.cos(lat2_rad)
-            y = math.cos(lat1_rad) * math.sin(lat2_rad) - \
-                math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon_rad)
-
-            initial_bearing = math.atan2(x, y)
-            # Convert from radians to degrees and normalize to [0,360)
-            bearing = (math.degrees(initial_bearing) + 360.0) % 360.0
-
-            return bearing
-        
-
-        self.add_computed_column(heading_column, gps_heading_function)
+        self.add_computed_column(
+            heading_column,
+            partial(
+                gps_heading_function,
+                heading_column=heading_column,
+                lat_column=lat_column,
+                long_column=long_column,
+                smoothing_window=smoothing_window
+            )
+        )
 
     def add_rotation_speed_from_heading_column(
         self,
@@ -382,33 +309,16 @@ class VboFile:
             self.add_gps_heading_column(heading_column=heading_column)
             remove_heading_column = True
 
-        def compute_rotation_speed(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
-            nval = len(next(iter(data.values()))) if data else 0
-            raw_rotation_speeds: List[float] = []
-            for i in range(nval):
-                if i == 0:
-                    raw_rotation_speeds.append(0.0)
-                else:
-                    prev_heading = float(data[heading_column][i - 1])
-                    curr_heading = float(data[heading_column][i])
-                    # shortest angle difference in degrees (-180, +180]
-                    delta_heading = (curr_heading - prev_heading + 540.0) % 360.0 - 180.0
-                    prev_time = hhmmsscc_to_milliseconds(data[time_column][i - 1]) / 1000.0
-                    curr_time = hhmmsscc_to_milliseconds(data[time_column][i]) / 1000.0
-                    dt = curr_time - prev_time if curr_time != prev_time else 1e-6
-                    raw_rotation_speeds.append(delta_heading / dt)
-            # smoothing (moving average)
-            window = max(1, int(smoothing_window))
-            smoothed: List[str] = []
-            for i in range(nval):
-                start = max(0, i - window // 2)
-                end = min(nval, i + window // 2 + 1)
-                smoothed_val = sum(raw_rotation_speeds[start:end]) / (end - start)
-                smoothed.append(f"{smoothed_val:.2f}")
-            data[rotation_speed_column] = smoothed
-            return data
-
-        self.add_computed_column(rotation_speed_column, compute_rotation_speed)
+        self.add_computed_column(
+            rotation_speed_column,
+            partial(
+                compute_rotation_speed,
+                rotation_speed_column=rotation_speed_column,
+                heading_column=heading_column,
+                time_column=time_column,
+                smoothing_window=smoothing_window
+            )
+        )
 
         if remove_heading_column:
             self.remove_column(heading_column, heading_column)
@@ -450,81 +360,15 @@ class VboFile:
             self.add_rotation_speed_from_heading_column(rotation_speed_column=rotation_speed_column)
             remove_rotation_column = True
 
-        def compute_oversteer(data: OrderedDict[str, List[str]]) -> OrderedDict[str, List[str]]:
-            nval = len(next(iter(data.values()))) if data else 0
-            data[oversteer_column] = []
-            for i in range(nval):
-                if i == 0:
-                    over_val = 0.0
-                else:
-                    rot = float(data[rotation_speed_column][i])
-                    gyro_z = float(data[gyro_z_column][i])
-                    over_val = rot + gyro_z # gyro_z is typically negative for clockwise rotation
-                data[oversteer_column].append(format_heading(over_val))
-            return data
-
-        self.add_computed_column(oversteer_column, compute_oversteer)
+        self.add_computed_column(
+            oversteer_column,
+            partial(
+                compute_oversteer,
+                rotation_speed_column=rotation_speed_column,
+                gyro_z_column=gyro_z_column,
+                oversteer_column=oversteer_column
+            )
+        )
 
         if remove_rotation_column:
             self.remove_column(rotation_speed_column, rotation_speed_column)
-
-
-def pad_with_zeros(number: int, total_length: int) -> str:
-    """
-    Zero-pad an integer to a fixed width.
-
-    Parameters:
-        number (int): Integer to format.
-        total_length (int): Total number of digits desired (leading zeros added as needed).
-
-    Returns:
-        str: Zero-padded decimal string.
-    """
-    return str(number).zfill(total_length)
-
-def format_heading(heading: float) -> str:
-    """
-    Format heading value for VBO output.
-
-    Parameters:
-        heading (float): Heading in degrees.
-
-    Returns:
-        str: Formatted heading string with 2 decimal places and at least 5 characters,
-             zero-padded as needed (example '012.345').
-    """
-    return f"{heading:05.2f}"
-
-def hhmmsscc_to_milliseconds(timestr: str) -> int:
-    """
-    Convert a time string in HHMMSS.CC format (hours, minutes, seconds, centiseconds)
-    to milliseconds.
-
-    Parameters:
-        timestr (str): Time string in the format 'HHMMSS.CC' (centiseconds). Leading zeros are allowed.
-
-    Returns:
-        int: Total milliseconds corresponding to the input time.
-
-    Example:
-        '094559.96' -> (9 hours, 45 minutes, 59.96 seconds) -> 34,199,960 ms
-    """
-    # ...existing code...
-    timestr = timestr.strip()
-    if '.' in timestr:
-        main, centis = timestr.split('.')
-    else:
-        main, centis = timestr, '00'
-    main = main.zfill(6)
-    hours = int(main[:2])
-    minutes = int(main[2:4])
-    seconds = int(main[4:6])
-    centiseconds = int(centis.ljust(2, '0'))  # pad right if needed
-
-    total_ms = (
-        hours * 3600 * 1000 +
-        minutes * 60 * 1000 +
-        seconds * 1000 +
-        centiseconds * 10
-    )
-    return total_ms
